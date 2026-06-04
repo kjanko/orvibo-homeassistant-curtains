@@ -1,0 +1,15 @@
+{
+  "domain": "orvibo_curtain",
+  "name": "Orvibo Curtain",
+  "version": "0.1.0",
+  "documentation": "https://github.com/kjanko/orvibo-curtain-control",
+  "codeowners": [
+    "@kjanko"
+  ],
+  "config_flow": true,
+  "iot_class": "cloud_polling",
+  "requirements": [
+    "pycryptodome>=3.20.0"
+  ]
+}
+

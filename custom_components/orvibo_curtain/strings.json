@@ -1,0 +1,26 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add Orvibo Curtain",
+        "description": "Enter your Orvibo/HomeMate account credentials and the device ID of your curtain motor.",
+        "data": {
+          "email": "Email",
+          "password": "Password",
+          "device_id": "Device ID"
+        },
+        "data_description": {
+          "device_id": "Found in the HomeMate/Cuco app under device settings, or captured via Frida."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to Orvibo cloud. Check your credentials and device ID.",
+      "invalid_auth": "Please fill in all fields.",
+      "unknown": "An unexpected error occurred."
+    },
+    "abort": {
+      "already_configured": "This device is already configured."
+    }
+  }
+}
