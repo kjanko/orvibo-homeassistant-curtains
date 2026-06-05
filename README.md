@@ -8,11 +8,11 @@ A custom Home Assistant integration for Orvibo/HomeMate WiFi curtain motors. Con
 
 ### HACS (Recommended)
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=kjanko&repository=orvibo-curtain-control&category=integration)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=kjanko&repository=orvibo-homeassistant-curtains&category=integration)
 
 1. Open HACS in Home Assistant
 2. Click the three dots in the top right → **Custom repositories**
-3. Add `https://github.com/kjanko/orvibo-curtain-control` with category **Integration**
+3. Add `https://github.com/kjanko/orvibo-homeassistant-curtains` with category **Integration**
 4. Search for "Orvibo Curtain" and install it
 5. Restart Home Assistant
 
