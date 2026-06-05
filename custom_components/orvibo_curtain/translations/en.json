@@ -22,6 +22,19 @@
     "abort": {
       "already_configured": "This device is already configured."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Orvibo Curtain Options",
+        "data": {
+          "invert_position": "Invert position"
+        },
+        "data_description": {
+          "invert_position": "When enabled, 0% means fully open and 100% means fully closed."
+        }
+      }
+    }
   }
 }
 

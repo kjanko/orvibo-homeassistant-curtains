@@ -20,6 +20,7 @@ from .const import (
     CONF_EMAIL,
     CONF_FAMILY_ID,
     CONF_HOST,
+    CONF_INVERT_POSITION,
     CONF_PASSWORD_MD5,
     DEFAULT_NAME,
     DOMAIN,
@@ -41,6 +42,12 @@ class OrviboCurtainConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Config flow: email + password + device_id → curtain entity."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        """Return the options flow handler."""
+        return OrviboCurtainOptionsFlow(config_entry)
 
     async def async_step_user(self, user_input=None):
         errors: dict[str, str] = {}
@@ -101,4 +108,26 @@ class OrviboCurtainConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user", data_schema=USER_SCHEMA, errors=errors
+        )
+
+
+class OrviboCurtainOptionsFlow(config_entries.OptionsFlow):
+    """Options flow for Orvibo Curtain (invert position, etc.)."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        self._config_entry = config_entry
+
+    async def async_step_init(self, user_input=None):
+        """Manage the options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        current = self._config_entry.options.get(CONF_INVERT_POSITION, False)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_INVERT_POSITION, default=current): bool,
+                }
+            ),
         )
