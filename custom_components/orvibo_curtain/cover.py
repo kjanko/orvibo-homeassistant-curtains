@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import logging
 
 from homeassistant.components.cover import (
@@ -12,12 +13,22 @@ from homeassistant.components.cover import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import OrviboApiError
-from .const import CONF_DEVICE_ID, CONF_DEVICE_NAME, CONF_INVERT_POSITION, DOMAIN
+from .const import (
+    CLOSED_THRESHOLD,
+    CONF_DEVICE_ID,
+    CONF_DEVICE_NAME,
+    CONF_DEVICE_UID,
+    CONF_INVERT_POSITION,
+    CONF_OPEN_POSITION,
+    DEFAULT_OPEN_POSITION,
+    DOMAIN,
+)
 from .coordinator import OrviboCurtainCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -48,17 +59,20 @@ class OrviboCurtainCover(CoordinatorEntity[OrviboCurtainCoordinator], CoverEntit
     def __init__(self, entry: ConfigEntry, coordinator: OrviboCurtainCoordinator) -> None:
         super().__init__(coordinator)
         self._entry = entry
-        device_id = entry.data[CONF_DEVICE_ID]
+        # Entries made before device discovery store the uid as device_id.
+        unique_id = entry.data.get(CONF_DEVICE_UID) or entry.data[CONF_DEVICE_ID]
         self._invert = entry.options.get(CONF_INVERT_POSITION, False)
+        self._open_position = int(
+            entry.options.get(CONF_OPEN_POSITION, DEFAULT_OPEN_POSITION)
+        )
 
-        self._attr_unique_id = device_id
+        self._attr_unique_id = unique_id
         self._attr_name = None
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, device_id)},
+            identifiers={(DOMAIN, unique_id)},
             name=entry.data.get(CONF_DEVICE_NAME) or "Orvibo Curtain",
             manufacturer="Orvibo",
-            model="WiFi Curtain Motor",
-            sw_version="5.2.5.301",
+            model="Curtain Motor",
         )
 
     def _to_ha_position(self, device_pos: int) -> int:
@@ -84,56 +98,34 @@ class OrviboCurtainCover(CoordinatorEntity[OrviboCurtainCoordinator], CoverEntit
         pos = self.current_cover_position
         if pos is None:
             return None
-        return pos == 0
+        return pos <= CLOSED_THRESHOLD
+
+    async def _async_command(self, action: str, func: Callable, *args) -> None:
+        try:
+            await self.hass.async_add_executor_job(func, *args)
+        except OrviboApiError as exc:
+            raise HomeAssistantError(f"Failed to {action} curtain: {exc}") from exc
+
+    async def _async_move_to(self, ha_pos: int, action: str) -> None:
+        device_pos = self._to_device_position(ha_pos)
+        await self._async_command(action, self.coordinator.api.set_position, device_pos)
+        self.coordinator.set_position(device_pos)
 
     async def async_open_cover(self, **kwargs) -> None:
-        """Open the curtain fully."""
-        try:
-            if self._invert:
-                await self.hass.async_add_executor_job(self.coordinator.api.close_curtain)
-            else:
-                await self.hass.async_add_executor_job(self.coordinator.api.open_curtain)
-        except OrviboApiError as exc:
-            _LOGGER.error("Failed to open curtain: %s", exc)
-            return
-        device_pos = 0 if self._invert else 100
-        self.coordinator._last_known_position = device_pos
-        self.coordinator.async_set_updated_data({"position": device_pos, "is_connected": True})
+        """Open the curtain to the configured open position (default 100%)."""
+        await self._async_move_to(self._open_position, "open")
 
     async def async_close_cover(self, **kwargs) -> None:
         """Close the curtain fully."""
-        try:
-            if self._invert:
-                await self.hass.async_add_executor_job(self.coordinator.api.open_curtain)
-            else:
-                await self.hass.async_add_executor_job(self.coordinator.api.close_curtain)
-        except OrviboApiError as exc:
-            _LOGGER.error("Failed to close curtain: %s", exc)
-            return
-        device_pos = 100 if self._invert else 0
-        self.coordinator._last_known_position = device_pos
-        self.coordinator.async_set_updated_data({"position": device_pos, "is_connected": True})
+        await self._async_move_to(0, "close")
 
     async def async_stop_cover(self, **kwargs) -> None:
         """Stop the curtain motor."""
-        try:
-            await self.hass.async_add_executor_job(self.coordinator.api.stop_curtain)
-        except OrviboApiError as exc:
-            _LOGGER.error("Failed to stop curtain: %s", exc)
+        await self._async_command("stop", self.coordinator.api.stop_curtain)
 
     async def async_set_cover_position(self, **kwargs) -> None:
         """Move curtain to a specific position (0-100)."""
         position = kwargs.get(ATTR_POSITION)
         if position is None:
             return
-        position = int(position)
-        device_pos = self._to_device_position(position)
-        try:
-            await self.hass.async_add_executor_job(
-                self.coordinator.api.set_position, device_pos
-            )
-        except OrviboApiError as exc:
-            _LOGGER.error("Failed to set position %d: %s", position, exc)
-            return
-        self.coordinator._last_known_position = device_pos
-        self.coordinator.async_set_updated_data({"position": device_pos, "is_connected": True})
+        await self._async_move_to(int(position), f"move to {int(position)}%")

@@ -3,24 +3,55 @@
     "step": {
       "user": {
         "title": "Add Orvibo Curtain",
-        "description": "Enter your Orvibo/HomeMate account credentials and the device ID of your curtain motor.",
+        "description": "Sign in with your Orvibo/HomeMate account.",
         "data": {
           "email": "Email",
-          "password": "Password",
+          "password": "Password"
+        }
+      },
+      "family": {
+        "title": "Choose your home",
+        "description": "Your account has more than one home. Pick the one with the curtain.",
+        "data": {
+          "family_id": "Home"
+        }
+      },
+      "device": {
+        "title": "Choose your curtain",
+        "description": "Pick the curtain motor from your account's devices. Known curtain motors are listed first.",
+        "data": {
+          "device_id": "Device"
+        }
+      },
+      "manual": {
+        "title": "Enter device ID",
+        "description": "Enter your curtain motor's device ID (its 32-character uid).",
+        "data": {
           "device_id": "Device ID"
         },
         "data_description": {
-          "device_id": "Found in the HomeMate/Cuco app under device settings, or captured via Frida."
+          "device_id": "Captured from the HomeMate app, for example via Frida (see the README)."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate Orvibo Curtain",
+        "description": "The Orvibo cloud rejected the saved password for {email}. Enter your current password.",
+        "data": {
+          "password": "Password"
         }
       }
     },
     "error": {
-      "cannot_connect": "Could not connect to Orvibo cloud. Check your credentials and device ID.",
-      "invalid_auth": "Please fill in all fields.",
+      "cannot_connect": "Could not connect to the Orvibo cloud.",
+      "invalid_auth": "The Orvibo cloud rejected the email or password.",
+      "missing_fields": "Please fill in all fields.",
+      "device_list_failed": "Could not load your device list. You can still enter the device ID manually.",
       "unknown": "An unexpected error occurred."
     },
     "abort": {
-      "already_configured": "This device is already configured."
+      "already_configured": "This device is already configured.",
+      "cannot_connect": "Signed in, but the curtain's control connection failed. Try again later.",
+      "reauth_successful": "Re-authentication was successful."
     }
   },
   "options": {
@@ -28,13 +59,14 @@
       "init": {
         "title": "Orvibo Curtain Options",
         "data": {
-          "invert_position": "Invert position"
+          "invert_position": "Invert position",
+          "open_position": "Open position"
         },
         "data_description": {
-          "invert_position": "When enabled, 0% means fully open and 100% means fully closed."
+          "invert_position": "When enabled, 0% means fully open and 100% means fully closed.",
+          "open_position": "How far the curtain opens when you press open or say \"open the curtain\". Setting an exact position still goes anywhere from 0 to 100%."
         }
       }
     }
   }
 }
-

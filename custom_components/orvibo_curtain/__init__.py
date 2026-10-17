@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 from .api import OrviboCurtainApi
 from .const import (
     CONF_DEVICE_ID,
+    CONF_DEVICE_UID,
     CONF_EMAIL,
     CONF_FAMILY_ID,
     CONF_HOST,
@@ -34,6 +35,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         password_md5=data[CONF_PASSWORD_MD5],
         family_id=data[CONF_FAMILY_ID],
         device_id=data[CONF_DEVICE_ID],
+        device_uid=data.get(CONF_DEVICE_UID),
     )
 
     coordinator = OrviboCurtainCoordinator(hass, api)

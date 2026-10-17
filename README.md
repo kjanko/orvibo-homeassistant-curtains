@@ -31,23 +31,32 @@ Restart Home Assistant.
 - **Open / Close / Stop** curtain
 - **Set exact position** (0–100%)
 - **Automatic polling** of curtain position
-- **Auto-discovery** of regional server and family ID
+- **Auto-discovery** of regional server, home and devices
+- **Configurable open position** — e.g. make "open" stop at 90%
+- **Re-authentication** prompt if your Orvibo password changes
 - **Bundled TLS certificates** — fully self-contained
-- **3-field setup** — just email, password, and device ID
 
 
 ## Setup
 
 1. Go to **Settings → Devices & Services → Add Integration**
 2. Search for **Orvibo Curtain**
-3. Enter:
-   - **Email** — your HomeMate/Cuco account email
-   - **Password** — your account password
-   - **Device ID** — your curtain's hardware UID (see below)
+3. Sign in with your HomeMate/Cuco account **email** and **password**
+4. If your account has several homes, pick the one with the curtain
+5. Pick your curtain from the device list (known curtain motors are listed first)
 
-## Finding your Device ID
+If your curtain isn't in the list, choose **Enter device ID manually** (see below).
 
-The device ID is the hardware UID of your curtain motor. You can find it by intercepting traffic from the HomeMate app using Frida:
+## Options
+
+Under **Settings → Devices & Services → Orvibo Curtain → Configure**:
+
+- **Invert position** — swap 0% and 100% if your motor reports them the other way round
+- **Open position** — how far the curtain opens on "open" (default 100%). Setting an exact position still works across the full 0–100% range.
+
+## Finding your Device ID manually
+
+Only needed if your curtain doesn't appear in the device list. The device ID is the hardware UID of your curtain motor. You can find it by intercepting traffic from the HomeMate app using Frida:
 
 ```bash
 frida -U -f com.orvibo.homemate -l hook_before_encrypt.js

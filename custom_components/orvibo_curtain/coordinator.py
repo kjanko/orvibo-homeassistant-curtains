@@ -6,10 +6,11 @@ from datetime import timedelta
 import logging
 
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import OrviboApiError, OrviboCurtainApi
-from .const import DEFAULT_POLL_INTERVAL
+from .api import OrviboApiError, OrviboAuthError, OrviboCurtainApi
+from .const import AUTH_FAILURES_BEFORE_REAUTH, DEFAULT_POLL_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,17 +33,26 @@ class OrviboCurtainCoordinator(DataUpdateCoordinator[dict]):
         self.api = api
         # Track last known position across polls (curtain may not always reply)
         self._last_known_position: int | None = None
+        self._auth_failures = 0
 
     async def _async_update_data(self) -> dict:
         """Poll the curtain. Position may be None if the curtain is idle."""
         try:
             position = await self.hass.async_add_executor_job(self.api.get_position)
+        except OrviboAuthError as exc:
+            # A single rejection can be a server hiccup; repeated ones mean
+            # the password changed, so ask the user to re-authenticate.
+            self._auth_failures += 1
+            if self._auth_failures >= AUTH_FAILURES_BEFORE_REAUTH:
+                raise ConfigEntryAuthFailed(str(exc)) from exc
+            raise UpdateFailed(str(exc)) from exc
         except OrviboApiError as exc:
             # Connection/login failed — entity should show as unavailable
             raise UpdateFailed(str(exc)) from exc
         except Exception as exc:
             raise UpdateFailed(f"Unexpected error: {exc}") from exc
 
+        self._auth_failures = 0
         # If position came back, update our cache
         if position is not None:
             self._last_known_position = position
@@ -51,3 +61,8 @@ class OrviboCurtainCoordinator(DataUpdateCoordinator[dict]):
             "position": self._last_known_position,
             "is_connected": True,
         }
+
+    def set_position(self, device_pos: int) -> None:
+        """Record a position after a successful command."""
+        self._last_known_position = device_pos
+        self.async_set_updated_data({"position": device_pos, "is_connected": True})

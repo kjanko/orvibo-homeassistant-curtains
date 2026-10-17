@@ -1,12 +1,13 @@
 """Orvibo cloud protocol client for the Home Assistant integration.
 
 Handles:
-- REST API discovery (OAuth login → familyId + host)
+- REST API (OAuth login → host, families and device list)
 - Binary socket protocol (TLS mutual-auth, AES-ECB encrypted JSON commands)
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 import hashlib
 import hmac
 import json
@@ -29,87 +30,178 @@ _LOGGER = logging.getLogger(__name__)
 _STATIC_KEY = b"khggd54865SNJHGF"
 _HMAC_SECRET = "nQ45RjPtOws96jmH"
 _INTEGRATION_DIR = os.path.dirname(os.path.abspath(__file__))
+_APP_VERSION = "5.2.5.301"
+
+# Device types known to be curtain motors (34 = curtain, 35 = roller shutter).
+# WiFi motors may report other types, so these only sort the device list.
+CURTAIN_DEVICE_TYPES = {34, 35}
 
 
 class OrviboApiError(Exception):
     """Raised when communication with the Orvibo cloud fails."""
 
 
+class OrviboAuthError(OrviboApiError):
+    """Raised when the Orvibo cloud rejects the account credentials."""
+
+
 # ---------------------------------------------------------------------------
-# REST API — only used to discover familyId + validate host
+# REST API — account login, family list and device list (setup only)
 # ---------------------------------------------------------------------------
 
 
-def discover_family(
-    email: str,
-    password_md5: str,
-    hosts: list[str],
-) -> tuple[str, str]:
-    """Find the correct regional host and familyId for this account.
+@dataclass
+class CloudAccount:
+    """A logged-in Orvibo REST session."""
 
-    Returns (host, family_id) or raises OrviboApiError.
-    """
+    host: str
+    access_token: str
+    user_id: str
+    families: list[dict] = field(default_factory=list)
+
+
+def _sign(params: dict) -> str:
+    """HMAC-SHA256 request signature: sorted non-empty params, then the key."""
+    items = [
+        f"{k}={params[k]}"
+        for k in sorted(params)
+        if params[k] is not None and str(params[k]).strip()
+    ]
+    items.append(f"key={_HMAC_SECRET}")
+    return hmac.new(
+        _HMAC_SECRET.encode(), "&".join(items).encode(), hashlib.sha256
+    ).hexdigest().upper()
+
+
+def _rest_context() -> ssl.SSLContext:
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
+    return ctx
 
+
+def _post_signed(host: str, path: str, params: dict) -> dict:
+    body = dict(params)
+    body["sign"] = _sign(params)
+    req = request.Request(
+        f"https://{host}{path}",
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with request.urlopen(req, timeout=15, context=_rest_context()) as resp:
+        return json.loads(resp.read().decode())
+
+
+def _parse_families(payload: dict) -> list[dict]:
+    """Family list; `data` is either a list or {"familyInfo": [...]}."""
+    raw = payload.get("data")
+    if isinstance(raw, dict):
+        raw = raw.get("familyInfo", [])
+    if not isinstance(raw, list):
+        return []
+    return [f for f in raw if isinstance(f, dict) and f.get("familyId")]
+
+
+def cloud_login(email: str, password_md5: str, hosts: list[str]) -> CloudAccount:
+    """Log in on the first regional host that accepts the account.
+
+    Raises OrviboAuthError if a host rejected the credentials and none accepted
+    them, OrviboApiError if no host could be reached.
+    """
+    rejected = False
     for host in hosts:
         try:
-            # OAuth login
             params = parse.urlencode({"userName": email, "type": "0", "password": password_md5})
-            url = f"https://{host}/getOauthToken?{params}"
-            req = request.Request(url, method="GET")
-            with request.urlopen(req, timeout=15, context=ctx) as resp:
+            req = request.Request(f"https://{host}/getOauthToken?{params}", method="GET")
+            with request.urlopen(req, timeout=15, context=_rest_context()) as resp:
                 oauth = json.loads(resp.read().decode())
         except Exception as exc:
             _LOGGER.debug("OAuth failed on %s: %s", host, exc)
             continue
 
         # Response is {"data": {"access_token": ..., "user_id": ...}, "status": 0}
-        data = oauth.get("data", oauth)
+        data = oauth.get("data") if isinstance(oauth.get("data"), dict) else oauth
         token = data.get("access_token") or data.get("accessToken")
         user_id = data.get("user_id") or data.get("userId")
         if not token or not user_id:
+            rejected = True
             continue
 
-        # Get family list
         try:
-            body = {
-                "accessToken": token,
-                "userId": user_id,
-                "timestamp": str(int(time.time() * 1000)),
-                "random": str(random.randint(100000, 999999)),
-            }
-            sign_items = [f"{k}={body[k]}" for k in sorted(body) if body[k] is not None]
-            sign_items.append(f"key={_HMAC_SECRET}")
-            body["sign"] = hmac.new(
-                _HMAC_SECRET.encode(), "&".join(sign_items).encode(), hashlib.sha256
-            ).hexdigest().upper()
-
-            req = request.Request(
-                f"https://{host}/v2/family/statistics/users",
-                data=json.dumps(body).encode(),
-                headers={"Content-Type": "application/json"},
-                method="POST",
+            family_resp = _post_signed(
+                host,
+                "/v2/family/statistics/users",
+                {
+                    "accessToken": token,
+                    "userId": user_id,
+                    "timestamp": str(int(time.time() * 1000)),
+                    "random": str(random.randint(100000, 999999)),
+                },
             )
-            with request.urlopen(req, timeout=15, context=ctx) as resp:
-                family_resp = json.loads(resp.read().decode())
         except Exception as exc:
             _LOGGER.debug("Family query failed on %s: %s", host, exc)
-            # Even without family list, we can return the host — user's familyId
-            # is probably derivable from their account
             continue
 
-        families = family_resp.get("data", [])
-        if families and isinstance(families, list):
-            family_id = families[0].get("familyId", "")
-            if family_id:
-                _LOGGER.info("Discovered host=%s familyId=%s", host, family_id)
-                return host, family_id
+        families = _parse_families(family_resp)
+        if families:
+            _LOGGER.debug("Logged in on %s with %d families", host, len(families))
+            return CloudAccount(host, token, user_id, families)
 
-    raise OrviboApiError(
-        "Could not connect to Orvibo cloud. Check email and password."
-    )
+    if rejected:
+        raise OrviboAuthError("Orvibo cloud rejected the email or password.")
+    raise OrviboApiError("Could not connect to Orvibo cloud.")
+
+
+def _parse_devices(payload: dict) -> list[dict]:
+    """Device records from a readtable response, curtain types first."""
+    data = payload.get("data")
+    raw = data.get("device", []) if isinstance(data, dict) else []
+    devices = [
+        d
+        for d in raw
+        if isinstance(d, dict)
+        and d.get("deviceId")
+        and d.get("uid")
+        and str(d.get("delFlag", 0)) != "1"
+    ]
+    return sorted(devices, key=lambda d: (not is_curtain(d), str(d.get("deviceName", ""))))
+
+
+def is_curtain(device: dict) -> bool:
+    """True if a device record has a known curtain motor type."""
+    try:
+        return int(device.get("deviceType")) in CURTAIN_DEVICE_TYPES
+    except (TypeError, ValueError):
+        return False
+
+
+def fetch_devices(account: CloudAccount, email: str, family_id: str) -> list[dict]:
+    """List the devices in a family (deviceId, uid, deviceName, deviceType)."""
+    try:
+        payload = _post_signed(
+            account.host,
+            "/v2/cmd/app/readtable",
+            {
+                "accessToken": account.access_token,
+                "dataType": "all",
+                "deviceFlag": 0,
+                "familyId": family_id,
+                "lastUpdateTime": 0,
+                "pageIndex": 0,
+                "random": str(random.randint(100000, 999999)),
+                "serial": random.randint(100000000, 999999999),
+                "timestamp": int(time.time() * 1000),
+                "userId": account.user_id,
+                "userName": email,
+                "ver": _APP_VERSION,
+            },
+        )
+    except Exception as exc:
+        raise OrviboApiError(f"Device list request failed: {exc}") from exc
+    if payload.get("status", 0) != 0 or payload.get("code", 0) != 0:
+        raise OrviboApiError("Orvibo cloud rejected the device list request.")
+    return _parse_devices(payload)
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +220,7 @@ class OrviboClient:
         password_md5: str,
         family_id: str,
         device_id: str,
+        device_uid: str | None = None,
     ) -> None:
         self._host = host
         self._port = port
@@ -135,6 +228,9 @@ class OrviboClient:
         self._password_md5 = password_md5
         self._family_id = family_id
         self._device_id = device_id
+        # Entries made before device discovery only know one ID (the uid)
+        # and send it as both uid and deviceId.
+        self._device_uid = device_uid or device_id
 
         self._sock: ssl.SSLSocket | None = None
         self._session_id = "0" * 32
@@ -255,8 +351,8 @@ class OrviboClient:
             "clientType": 1,
             "uniSerial": int(time.time() * 1000),
             "serverRecord": False,
-            "ver": "5.2.5.301",
-            "debugInfo": "Android_ZhiJia365_32_5.2.5.301",
+            "ver": _APP_VERSION,
+            "debugInfo": f"Android_ZhiJia365_32_{_APP_VERSION}",
         }
         self._sock.sendall(self._build_packet(payload, use_dynamic=False))
         resp = self._recv(timeout=10)
@@ -268,7 +364,8 @@ class OrviboClient:
             return True
         return False
 
-    def login(self) -> bool:
+    def login(self) -> dict | None:
+        """Send the login command and return the server's reply (None on timeout)."""
         payload = {
             "userName": self._email,
             "password": self._password_md5,
@@ -280,12 +377,19 @@ class OrviboClient:
             "clientType": 1,
             "uniSerial": int(time.time() * 1000),
             "serverRecord": False,
-            "ver": "5.2.5.301",
-            "debugInfo": "Android_ZhiJia365_32_5.2.5.301",
+            "ver": _APP_VERSION,
+            "debugInfo": f"Android_ZhiJia365_32_{_APP_VERSION}",
         }
         self._sock.sendall(self._build_packet(payload))
-        resp = self._recv(timeout=10)
-        return bool(resp and resp.get("status") == 0)
+        return self._recv(timeout=10)
+
+    def _is_own_report(self, resp: dict) -> bool:
+        """True unless a status report names a different device."""
+        uid = resp.get("uid")
+        device_id = resp.get("deviceId")
+        if uid is None and device_id is None:
+            return True
+        return uid == self._device_uid or device_id in (self._device_id, self._device_uid)
 
     def query_position(self) -> int | None:
         payload = {
@@ -295,8 +399,8 @@ class OrviboClient:
             "clientType": 1,
             "uniSerial": int(time.time() * 1000),
             "serverRecord": False,
-            "ver": "5.2.5.301",
-            "debugInfo": "Android_ZhiJia365_32_5.2.5.301",
+            "ver": _APP_VERSION,
+            "debugInfo": f"Android_ZhiJia365_32_{_APP_VERSION}",
         }
         self._sock.sendall(self._build_packet(payload))
         deadline = time.time() + 5
@@ -304,13 +408,13 @@ class OrviboClient:
             resp = self._recv(timeout=2)
             if not resp:
                 continue
-            if resp.get("cmd") == 42 and "value1" in resp:
+            if resp.get("cmd") == 42 and "value1" in resp and self._is_own_report(resp):
                 return max(0, min(100, int(resp["value1"])))
         return None
 
     def send_control(self, order: str, value1: int) -> bool:
         payload = {
-            "uid": self._device_id,
+            "uid": self._device_uid,
             "userName": self._email,
             "deviceId": self._device_id,
             "groupId": "",
@@ -328,8 +432,8 @@ class OrviboClient:
             "clientType": 1,
             "uniSerial": int(time.time() * 1000),
             "serverRecord": False,
-            "ver": "5.2.5.301",
-            "debugInfo": "Android_ZhiJia365_32_5.2.5.301",
+            "ver": _APP_VERSION,
+            "debugInfo": f"Android_ZhiJia365_32_{_APP_VERSION}",
         }
         self._sock.sendall(self._build_packet(payload))
         resp = self._recv(timeout=10)
@@ -350,13 +454,20 @@ class OrviboCurtainApi:
     """Manages short-lived sessions to the Orvibo binary protocol."""
 
     def __init__(
-        self, host: str, email: str, password_md5: str, family_id: str, device_id: str
+        self,
+        host: str,
+        email: str,
+        password_md5: str,
+        family_id: str,
+        device_id: str,
+        device_uid: str | None = None,
     ) -> None:
         self._host = host
         self._email = email
         self._password_md5 = password_md5
         self._family_id = family_id
         self._device_id = device_id
+        self._device_uid = device_uid
 
     def _open_session(self) -> OrviboClient:
         from .const import DEFAULT_PORT
@@ -367,14 +478,19 @@ class OrviboCurtainApi:
             password_md5=self._password_md5,
             family_id=self._family_id,
             device_id=self._device_id,
+            device_uid=self._device_uid,
         )
         client.connect()
         if not client.handshake():
             client.disconnect()
             raise OrviboApiError("Handshake failed")
-        if not client.login():
+        resp = client.login()
+        if not resp or resp.get("status") != 0:
             client.disconnect()
-            raise OrviboApiError("Login failed")
+            if resp:
+                # The server answered and refused: the credentials are wrong.
+                raise OrviboAuthError(f"Login rejected (status {resp.get('status')})")
+            raise OrviboApiError("Login timed out")
         return client
 
     def validate_credentials(self) -> bool:
@@ -389,30 +505,18 @@ class OrviboCurtainApi:
         finally:
             client.disconnect()
 
-    def open_curtain(self) -> bool:
+    def _control(self, order: str, value1: int) -> None:
         client = self._open_session()
         try:
-            return client.send_control("open", 100)
+            ok = client.send_control(order, value1)
         finally:
             client.disconnect()
+        if not ok:
+            raise OrviboApiError(f"Curtain did not acknowledge '{order}' ({value1})")
 
-    def close_curtain(self) -> bool:
-        client = self._open_session()
-        try:
-            return client.send_control("open", 0)
-        finally:
-            client.disconnect()
+    def stop_curtain(self) -> None:
+        self._control("stop", 0)
 
-    def stop_curtain(self) -> bool:
-        client = self._open_session()
-        try:
-            return client.send_control("stop", 0)
-        finally:
-            client.disconnect()
-
-    def set_position(self, position: int) -> bool:
-        client = self._open_session()
-        try:
-            return client.send_control("open", max(0, min(100, position)))
-        finally:
-            client.disconnect()
+    def set_position(self, position: int) -> None:
+        """Move to a device position (0-100). Open and close are 100 and 0."""
+        self._control("open", max(0, min(100, position)))
