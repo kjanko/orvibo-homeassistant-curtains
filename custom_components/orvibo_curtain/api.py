@@ -384,12 +384,9 @@ class OrviboClient:
         return self._recv(timeout=10)
 
     def _is_own_report(self, resp: dict) -> bool:
-        """True unless a status report names a different device."""
-        uid = resp.get("uid")
-        device_id = resp.get("deviceId")
-        if uid is None and device_id is None:
-            return True
-        return uid == self._device_uid or device_id in (self._device_id, self._device_uid)
+        """True if a status report names this curtain."""
+        ids = {self._device_id, self._device_uid}
+        return resp.get("uid") in ids or resp.get("deviceId") in ids
 
     def query_position(self) -> int | None:
         payload = {
@@ -403,14 +400,26 @@ class OrviboClient:
             "debugInfo": f"Android_ZhiJia365_32_{_APP_VERSION}",
         }
         self._sock.sendall(self._build_packet(payload))
+        # Prefer a report that names this curtain. Reports don't always carry
+        # the IDs the entry knows (WiFi motors report other IDs), so fall back
+        # to the first report, as before.
+        fallback: int | None = None
         deadline = time.time() + 5
         while time.time() < deadline:
             resp = self._recv(timeout=2)
             if not resp:
                 continue
-            if resp.get("cmd") == 42 and "value1" in resp and self._is_own_report(resp):
-                return max(0, min(100, int(resp["value1"])))
-        return None
+            if resp.get("cmd") == 42 and "value1" in resp:
+                position = max(0, min(100, int(resp["value1"])))
+                _LOGGER.debug(
+                    "Position report %s (uid=%s deviceId=%s)",
+                    position, resp.get("uid"), resp.get("deviceId"),
+                )
+                if self._is_own_report(resp):
+                    return position
+                if fallback is None:
+                    fallback = position
+        return fallback
 
     def send_control(self, order: str, value1: int) -> bool:
         payload = {

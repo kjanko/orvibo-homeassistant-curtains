@@ -68,20 +68,45 @@ def _client(device_id="dev", device_uid=None):
 
 
 class TestOwnReport(unittest.TestCase):
-    """Position reports for other devices are ignored."""
+    """Matching position reports to this curtain."""
 
     def test_legacy_entry_uses_one_id_for_both(self):
         client = _client(device_id="uid1")
         self.assertTrue(client._is_own_report({"uid": "uid1"}))
         self.assertTrue(client._is_own_report({"deviceId": "uid1"}))
 
-    def test_other_device_rejected(self):
+    def test_other_device_not_matched(self):
         client = _client(device_id="dev1", device_uid="uid1")
         self.assertFalse(client._is_own_report({"uid": "uid2", "deviceId": "dev2"}))
         self.assertTrue(client._is_own_report({"uid": "uid1", "deviceId": "dev1"}))
 
-    def test_report_without_ids_accepted(self):
-        self.assertTrue(_client()._is_own_report({"cmd": 42, "value1": 50}))
+
+class TestQueryPosition(unittest.TestCase):
+    """query_position prefers this curtain's report but never drops all reports."""
+
+    def _query(self, client, replies):
+        client._sock = mock.Mock()
+        with mock.patch.object(OrviboClient, "_recv", side_effect=replies + [None] * 10), \
+                mock.patch("custom_components.orvibo_curtain.api.time.time",
+                           side_effect=[0, 0] + [1] * len(replies) + [10] * 20):
+            return client.query_position()
+
+    def test_matching_report_preferred(self):
+        client = _client(device_id="dev1", device_uid="uid1")
+        replies = [
+            {"cmd": 42, "value1": 10, "uid": "other"},
+            {"cmd": 42, "value1": 89, "uid": "uid1"},
+        ]
+        self.assertEqual(self._query(client, replies), 89)
+
+    def test_unmatched_ids_fall_back_to_first_report(self):
+        # Regression: WiFi motors report IDs the entry doesn't know.
+        client = _client(device_id="fa4b")
+        replies = [{"cmd": 42, "value1": 89, "uid": "x", "deviceId": "y"}]
+        self.assertEqual(self._query(client, replies), 89)
+
+    def test_no_reports_returns_none(self):
+        self.assertIsNone(self._query(_client(), []))
 
 
 class TestSessionErrors(unittest.TestCase):
