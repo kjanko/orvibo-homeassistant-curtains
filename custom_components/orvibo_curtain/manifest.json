@@ -1,7 +1,7 @@
 {
   "domain": "orvibo_curtain",
   "name": "Orvibo Curtain",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "documentation": "https://github.com/kjanko/orvibo-homeassistant-curtains",
   "issue_tracker": "https://github.com/kjanko/orvibo-homeassistant-curtains/issues",
   "codeowners": ["@kjanko"],

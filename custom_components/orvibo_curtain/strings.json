@@ -64,7 +64,7 @@
         },
         "data_description": {
           "invert_position": "When enabled, 0% means fully open and 100% means fully closed.",
-          "open_position": "How far the curtain opens when you press open or say \"open the curtain\". Setting an exact position still goes anywhere from 0 to 100%."
+          "open_position": "The motor position that counts as fully open. Home Assistant's 0-100% is scaled to fit, so with 90% the curtain opens to 90% and shows as 100% open, and 50% on the slider moves it to 45%."
         }
       }
     }

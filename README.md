@@ -32,7 +32,7 @@ Restart Home Assistant.
 - **Set exact position** (0–100%)
 - **Automatic polling** of curtain position
 - **Auto-discovery** of regional server, home and devices
-- **Configurable open position** — e.g. make "open" stop at 90%
+- **Configurable open position** — e.g. treat 90% as fully open, with the slider scaled to match
 - **Re-authentication** prompt if your Orvibo password changes
 - **Bundled TLS certificates** — fully self-contained
 
@@ -52,7 +52,7 @@ If your curtain isn't in the list, choose **Enter device ID manually** (see belo
 Under **Settings → Devices & Services → Orvibo Curtain → Configure**:
 
 - **Invert position** — swap 0% and 100% if your motor reports them the other way round
-- **Open position** — how far the curtain opens on "open" (default 100%). Setting an exact position still works across the full 0–100% range.
+- **Open position** — the motor position that counts as fully open (default 100%). The 0–100% slider is scaled to fit: with 90%, the curtain opens to 90% and shows as 100%, and 50% on the slider moves it to 45%.
 
 ## Finding your Device ID manually
 
