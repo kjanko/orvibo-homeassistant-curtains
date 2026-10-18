@@ -6,6 +6,8 @@ PLATFORMS = ["cover"]
 DEFAULT_PORT = 10002
 DEFAULT_NAME = "Orvibo Curtain"
 DEFAULT_POLL_INTERVAL = 60
+# While the motor is idle it doesn't answer polls; read the cloud's record at most this often (seconds)
+CLOUD_POSITION_INTERVAL = 600
 DEFAULT_OPEN_POSITION = 100
 DEFAULT_CLOSED_POSITION = 0
 

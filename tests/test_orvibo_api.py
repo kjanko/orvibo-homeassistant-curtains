@@ -13,6 +13,7 @@ from custom_components.orvibo_curtain.api import (
     OrviboAuthError,
     OrviboClient,
     OrviboCurtainApi,
+    _cloud_position,
     _parse_devices,
     _parse_families,
     _sign,
@@ -53,6 +54,39 @@ class TestCloudParsing(unittest.TestCase):
             }
         }
         self.assertEqual([d["deviceId"] for d in _parse_devices(payload)], ["2", "1"])
+
+
+class TestCloudPosition(unittest.TestCase):
+    """Reading the curtain's last position from the cloud's device table."""
+
+    PAYLOAD = {
+        "data": {
+            "device": [
+                {"deviceId": "dev1", "uid": "uid1"},
+                {"deviceId": "dev2", "uid": "uid2"},
+            ],
+            "deviceStatus": [
+                {"deviceId": "dev2", "value1": 12},
+                {"deviceId": "dev1", "value1": 6},
+            ],
+        }
+    }
+
+    def test_discovered_entry_matches_device_id(self):
+        self.assertEqual(_cloud_position(self.PAYLOAD, "dev1", "uid1"), 6)
+
+    def test_legacy_entry_matches_through_uid(self):
+        # Entries made before discovery know only the uid, used as both IDs.
+        self.assertEqual(_cloud_position(self.PAYLOAD, "uid1", "uid1"), 6)
+
+    def test_percent_property_fallback_and_clamp(self):
+        payload = {"data": {"device": [], "deviceStatus": [
+            {"deviceId": "dev1", "properties": {"percent": 140}}]}}
+        self.assertEqual(_cloud_position(payload, "dev1", "dev1"), 100)
+
+    def test_unknown_device_or_bad_payload(self):
+        self.assertIsNone(_cloud_position(self.PAYLOAD, "nope", "nope"))
+        self.assertIsNone(_cloud_position({"data": None}, "dev1", "uid1"))
 
 
 def _client(device_id="dev", device_uid=None):

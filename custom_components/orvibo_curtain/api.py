@@ -176,8 +176,8 @@ def is_curtain(device: dict) -> bool:
         return False
 
 
-def fetch_devices(account: CloudAccount, email: str, family_id: str) -> list[dict]:
-    """List the devices in a family (deviceId, uid, deviceName, deviceType)."""
+def _readtable(account: CloudAccount, email: str, family_id: str) -> dict:
+    """Fetch the family's device table (devices and their last known statuses)."""
     try:
         payload = _post_signed(
             account.host,
@@ -198,10 +198,43 @@ def fetch_devices(account: CloudAccount, email: str, family_id: str) -> list[dic
             },
         )
     except Exception as exc:
-        raise OrviboApiError(f"Device list request failed: {exc}") from exc
+        raise OrviboApiError(f"Device table request failed: {exc}") from exc
     if payload.get("status", 0) != 0 or payload.get("code", 0) != 0:
-        raise OrviboApiError("Orvibo cloud rejected the device list request.")
-    return _parse_devices(payload)
+        raise OrviboApiError("Orvibo cloud rejected the device table request.")
+    return payload
+
+
+def fetch_devices(account: CloudAccount, email: str, family_id: str) -> list[dict]:
+    """List the devices in a family (deviceId, uid, deviceName, deviceType)."""
+    return _parse_devices(_readtable(account, email, family_id))
+
+
+def _cloud_position(payload: dict, device_id: str, device_uid: str) -> int | None:
+    """The curtain's last known position from a readtable response.
+
+    Statuses are keyed by deviceId; entries made before device discovery only
+    know the uid, so match the device record on either ID first.
+    """
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return None
+    ids = {device_id, device_uid}
+    record_ids = {
+        d.get("deviceId")
+        for d in data.get("device", [])
+        if isinstance(d, dict) and (d.get("deviceId") in ids or d.get("uid") in ids)
+    } | ids
+    for status in data.get("deviceStatus", []):
+        if not isinstance(status, dict) or status.get("deviceId") not in record_ids:
+            continue
+        value = status.get("value1")
+        if value is None and isinstance(status.get("properties"), dict):
+            value = status["properties"].get("percent")
+        try:
+            return max(0, min(100, int(value)))
+        except (TypeError, ValueError):
+            return None
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -483,6 +516,26 @@ class OrviboCurtainApi:
         self._family_id = family_id
         self._device_id = device_id
         self._device_uid = device_uid
+        self._account: CloudAccount | None = None
+
+    def get_cloud_position(self) -> int | None:
+        """The curtain's last position as recorded by the Orvibo cloud.
+
+        The motor only answers position queries around movement, so this is
+        the fallback while it is idle. Re-logs in once if the token expired.
+        """
+        for attempt in range(2):
+            if self._account is None:
+                self._account = cloud_login(self._email, self._password_md5, [self._host])
+            try:
+                payload = _readtable(self._account, self._email, self._family_id)
+            except OrviboApiError:
+                self._account = None
+                if attempt:
+                    raise
+                continue
+            return _cloud_position(payload, self._device_id, self._device_uid or self._device_id)
+        return None
 
     def _open_session(self) -> OrviboClient:
         from .const import DEFAULT_PORT
