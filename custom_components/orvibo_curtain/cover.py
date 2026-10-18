@@ -21,15 +21,18 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .api import OrviboApiError
 from .const import (
     CLOSED_THRESHOLD,
+    CONF_CLOSED_POSITION,
     CONF_DEVICE_ID,
     CONF_DEVICE_NAME,
     CONF_DEVICE_UID,
     CONF_INVERT_POSITION,
     CONF_OPEN_POSITION,
+    DEFAULT_CLOSED_POSITION,
     DEFAULT_OPEN_POSITION,
     DOMAIN,
 )
 from .coordinator import OrviboCurtainCoordinator
+from .position import to_device_position, to_ha_position
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -65,6 +68,9 @@ class OrviboCurtainCover(CoordinatorEntity[OrviboCurtainCoordinator], CoverEntit
         self._open_position = int(
             entry.options.get(CONF_OPEN_POSITION, DEFAULT_OPEN_POSITION)
         )
+        self._closed_position = int(
+            entry.options.get(CONF_CLOSED_POSITION, DEFAULT_CLOSED_POSITION)
+        )
 
         self._attr_unique_id = unique_id
         self._attr_name = None
@@ -76,18 +82,16 @@ class OrviboCurtainCover(CoordinatorEntity[OrviboCurtainCoordinator], CoverEntit
         )
 
     def _to_ha_position(self, device_pos: int) -> int:
-        """Convert device position to HA position.
-
-        HA's 0-100% spans the motor's 0% to the configured open position, so a
-        curtain at the open position shows as 100%.
-        """
-        opened = 100 - device_pos if self._invert else device_pos
-        return min(100, round(opened * 100 / self._open_position))
+        """Convert device position to HA position (scaled to the open/closed positions)."""
+        return to_ha_position(
+            device_pos, self._closed_position, self._open_position, self._invert
+        )
 
     def _to_device_position(self, ha_pos: int) -> int:
         """Convert HA position to device position (inverse of _to_ha_position)."""
-        opened = round(ha_pos * self._open_position / 100)
-        return 100 - opened if self._invert else opened
+        return to_device_position(
+            ha_pos, self._closed_position, self._open_position, self._invert
+        )
 
     @property
     def current_cover_position(self) -> int | None:
@@ -122,7 +126,7 @@ class OrviboCurtainCover(CoordinatorEntity[OrviboCurtainCoordinator], CoverEntit
         await self._async_move_to(100, "open")
 
     async def async_close_cover(self, **kwargs) -> None:
-        """Close the curtain fully."""
+        """Close the curtain to the configured closed position (default 0%)."""
         await self._async_move_to(0, "close")
 
     async def async_stop_cover(self, **kwargs) -> None:

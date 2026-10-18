@@ -7,6 +7,7 @@ DEFAULT_PORT = 10002
 DEFAULT_NAME = "Orvibo Curtain"
 DEFAULT_POLL_INTERVAL = 60
 DEFAULT_OPEN_POSITION = 100
+DEFAULT_CLOSED_POSITION = 0
 
 # Positions at or below this count as closed (motors often stop at 1-2%)
 CLOSED_THRESHOLD = 5
@@ -38,3 +39,4 @@ CONF_DEVICE_NAME = "device_name"
 # Options keys
 CONF_INVERT_POSITION = "invert_position"
 CONF_OPEN_POSITION = "open_position"
+CONF_CLOSED_POSITION = "closed_position"

@@ -53,6 +53,7 @@ Under **Settings → Devices & Services → Orvibo Curtain → Configure**:
 
 - **Invert position** — swap 0% and 100% if your motor reports them the other way round
 - **Open position** — the motor position that counts as fully open (default 100%). The 0–100% slider is scaled to fit: with 90%, the curtain opens to 90% and shows as 100%, and 50% on the slider moves it to 45%.
+- **Closed position** — the motor position that counts as fully closed (default 0%). Useful when the curtain can't close all the way (e.g. fabric fixed at the ends): with 6%, closing stops at 6% and shows as closed. The slider spans the closed to open position.
 
 ## Finding your Device ID manually
 

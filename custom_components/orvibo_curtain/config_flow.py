@@ -40,9 +40,11 @@ from .const import (
     CONF_EMAIL,
     CONF_FAMILY_ID,
     CONF_HOST,
+    CONF_CLOSED_POSITION,
     CONF_INVERT_POSITION,
     CONF_OPEN_POSITION,
     CONF_PASSWORD_MD5,
+    DEFAULT_CLOSED_POSITION,
     DEFAULT_NAME,
     DEFAULT_OPEN_POSITION,
     DOMAIN,
@@ -282,38 +284,52 @@ class OrviboCurtainConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class OrviboCurtainOptionsFlow(config_entries.OptionsFlow):
-    """Options flow for Orvibo Curtain (invert position, open position)."""
+    """Options flow for Orvibo Curtain (invert, open and closed position)."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         self._config_entry = config_entry
 
     async def async_step_init(self, user_input=None):
         """Manage the options."""
+        errors: dict[str, str] = {}
         if user_input is not None:
             user_input[CONF_OPEN_POSITION] = int(user_input[CONF_OPEN_POSITION])
-            return self.async_create_entry(title="", data=user_input)
+            user_input[CONF_CLOSED_POSITION] = int(user_input[CONF_CLOSED_POSITION])
+            if user_input[CONF_CLOSED_POSITION] >= user_input[CONF_OPEN_POSITION]:
+                errors["base"] = "closed_not_below_open"
+            else:
+                return self.async_create_entry(title="", data=user_input)
 
-        options = self._config_entry.options
+        current = user_input or self._config_entry.options
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
                     vol.Optional(
                         CONF_INVERT_POSITION,
-                        default=options.get(CONF_INVERT_POSITION, False),
+                        default=current.get(CONF_INVERT_POSITION, False),
                     ): bool,
                     vol.Optional(
                         CONF_OPEN_POSITION,
-                        default=options.get(CONF_OPEN_POSITION, DEFAULT_OPEN_POSITION),
-                    ): NumberSelector(
-                        NumberSelectorConfig(
-                            min=1,
-                            max=100,
-                            step=1,
-                            unit_of_measurement="%",
-                            mode=NumberSelectorMode.SLIDER,
-                        )
-                    ),
+                        default=current.get(CONF_OPEN_POSITION, DEFAULT_OPEN_POSITION),
+                    ): _percent_slider(1, 100),
+                    vol.Optional(
+                        CONF_CLOSED_POSITION,
+                        default=current.get(CONF_CLOSED_POSITION, DEFAULT_CLOSED_POSITION),
+                    ): _percent_slider(0, 50),
                 }
             ),
+            errors=errors,
         )
+
+
+def _percent_slider(minimum: int, maximum: int) -> NumberSelector:
+    return NumberSelector(
+        NumberSelectorConfig(
+            min=minimum,
+            max=maximum,
+            step=1,
+            unit_of_measurement="%",
+            mode=NumberSelectorMode.SLIDER,
+        )
+    )

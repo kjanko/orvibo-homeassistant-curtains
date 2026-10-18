@@ -60,13 +60,18 @@
         "title": "Orvibo Curtain Options",
         "data": {
           "invert_position": "Invert position",
-          "open_position": "Open position"
+          "open_position": "Open position",
+          "closed_position": "Closed position"
         },
         "data_description": {
           "invert_position": "When enabled, 0% means fully open and 100% means fully closed.",
-          "open_position": "The motor position that counts as fully open. Home Assistant's 0-100% is scaled to fit, so with 90% the curtain opens to 90% and shows as 100% open, and 50% on the slider moves it to 45%."
+          "open_position": "The motor position that counts as fully open. Home Assistant's 0-100% is scaled to fit, so with 90% the curtain opens to 90% and shows as 100% open, and 50% on the slider moves it to 45%.",
+          "closed_position": "The motor position that counts as fully closed (default 0%). Use it if the curtain can't close all the way, for example when the fabric is held at the ends: with 6%, closing stops at 6% and shows as 0% closed."
         }
       }
+    },
+    "error": {
+      "closed_not_below_open": "Closed position must be lower than the open position."
     }
   }
 }
