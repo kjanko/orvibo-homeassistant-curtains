@@ -135,11 +135,45 @@ class TestSessionErrors(unittest.TestCase):
             api.validate_credentials()
         self.assertNotIsInstance(ctx.exception, OrviboAuthError)
 
-    def test_unacknowledged_command_raises(self):
+    def test_unconfirmed_command_warns_instead_of_raising(self):
+        # Regression: the curtain moved but HA reported "did not acknowledge".
         api = self._api_with_login({"cmd": 2, "status": 0})
-        with mock.patch.object(OrviboClient, "send_control", return_value=False):
-            with self.assertRaises(OrviboApiError):
+        reply = {"cmd": 15, "status": 26, "serial": 1}
+        with mock.patch.object(OrviboClient, "send_control", return_value=(False, [reply])):
+            with self.assertLogs("custom_components.orvibo_curtain.api", "WARNING") as logs:
                 api.set_position(90)
+        self.assertIn("did not confirm", logs.output[0])
+
+    def test_connection_failure_still_raises(self):
+        api = self._api_with_login(None)
+        with self.assertRaises(OrviboApiError):
+            api.set_position(90)
+
+
+class TestSendControl(unittest.TestCase):
+    """send_control keeps reading until a reply confirms the command."""
+
+    def _send(self, replies):
+        client = _client()
+        client._sock = mock.Mock()
+        times = iter([0] + [i * 0.5 for i in range(1, 40)])
+        with mock.patch.object(OrviboClient, "_recv", side_effect=replies + [None] * 40), \
+                mock.patch("custom_components.orvibo_curtain.api.time.time", side_effect=lambda: next(times)):
+            return client.send_control("open", 50)
+
+    def test_confirmation_after_other_packets(self):
+        ok, seen = self._send([{"cmd": 99}, {"cmd": 15, "status": 1}, {"cmd": 15, "status": 0}])
+        self.assertTrue(ok)
+        self.assertEqual(len(seen), 3)
+
+    def test_status_report_counts_as_confirmation(self):
+        ok, _ = self._send([{"cmd": 42, "value1": 50}])
+        self.assertTrue(ok)
+
+    def test_no_confirmation(self):
+        ok, seen = self._send([{"cmd": 15, "status": 26}])
+        self.assertFalse(ok)
+        self.assertEqual(seen, [{"cmd": 15, "status": 26}])
 
 
 class TestPacketCodec(unittest.TestCase):

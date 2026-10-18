@@ -421,7 +421,8 @@ class OrviboClient:
                     fallback = position
         return fallback
 
-    def send_control(self, order: str, value1: int) -> bool:
+    def send_control(self, order: str, value1: int) -> tuple[bool, list[dict]]:
+        """Send a control command; return (confirmed, replies seen while waiting)."""
         payload = {
             "uid": self._device_uid,
             "userName": self._email,
@@ -445,13 +446,18 @@ class OrviboClient:
             "debugInfo": f"Android_ZhiJia365_32_{_APP_VERSION}",
         }
         self._sock.sendall(self._build_packet(payload))
-        resp = self._recv(timeout=10)
-        if resp:
-            if resp.get("status") == 0:
-                return True
-            if resp.get("cmd") == 42:
-                return True
-        return False
+        # The cloud may send other packets (interim statuses, status reports)
+        # before confirming, so read for a while instead of trusting the first.
+        replies: list[dict] = []
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            resp = self._recv(timeout=min(2.0, max(0.1, deadline - time.time())))
+            if not resp:
+                continue
+            replies.append(resp)
+            if resp.get("status") == 0 or resp.get("cmd") == 42:
+                return True, replies
+        return False, replies
 
 
 # ---------------------------------------------------------------------------
@@ -517,11 +523,17 @@ class OrviboCurtainApi:
     def _control(self, order: str, value1: int) -> None:
         client = self._open_session()
         try:
-            ok = client.send_control(order, value1)
+            ok, replies = client.send_control(order, value1)
         finally:
             client.disconnect()
         if not ok:
-            raise OrviboApiError(f"Curtain did not acknowledge '{order}' ({value1})")
+            # Commands reach the motor even when the cloud's reply doesn't look
+            # like a confirmation, so warn instead of failing the action.
+            _LOGGER.warning(
+                "Orvibo cloud did not confirm '%s' (%s); replies: %s",
+                order, value1,
+                [{k: r.get(k) for k in ("cmd", "status", "serial", "value1")} for r in replies] or "none",
+            )
 
     def stop_curtain(self) -> None:
         self._control("stop", 0)
