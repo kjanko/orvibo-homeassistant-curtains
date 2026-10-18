@@ -66,3 +66,10 @@ class OrviboCurtainCoordinator(DataUpdateCoordinator[dict]):
         """Record a position after a successful command."""
         self._last_known_position = device_pos
         self.async_set_updated_data({"position": device_pos, "is_connected": True})
+
+    def restore_position(self, device_pos: int) -> None:
+        """Seed the position from before a restart; a real poll result wins."""
+        if self._last_known_position is not None:
+            return
+        self._last_known_position = device_pos
+        self.data = {**(self.data or {}), "position": device_pos}

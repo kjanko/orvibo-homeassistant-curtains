@@ -16,6 +16,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import OrviboApiError
@@ -47,7 +48,9 @@ async def async_setup_entry(
     async_add_entities([OrviboCurtainCover(entry, coordinator)])
 
 
-class OrviboCurtainCover(CoordinatorEntity[OrviboCurtainCoordinator], CoverEntity):
+class OrviboCurtainCover(
+    CoordinatorEntity[OrviboCurtainCoordinator], RestoreEntity, CoverEntity
+):
     """Represents an Orvibo/HomeMate curtain motor."""
 
     _attr_device_class = CoverDeviceClass.CURTAIN
@@ -92,6 +95,22 @@ class OrviboCurtainCover(CoordinatorEntity[OrviboCurtainCoordinator], CoverEntit
         return to_device_position(
             ha_pos, self._closed_position, self._open_position, self._invert
         )
+
+    async def async_added_to_hass(self) -> None:
+        """Show the last known position until a poll reports one."""
+        await super().async_added_to_hass()
+        if self.coordinator.data and self.coordinator.data.get("position") is not None:
+            return
+        last = await self.async_get_last_state()
+        if last is None or last.state in ("unknown", "unavailable"):
+            return
+        ha_pos = last.attributes.get("current_position")
+        if ha_pos is None:
+            ha_pos = 0 if last.state == "closed" else 100 if last.state == "open" else None
+        if ha_pos is None:
+            return
+        self.coordinator.restore_position(self._to_device_position(int(ha_pos)))
+        self.async_write_ha_state()
 
     @property
     def current_cover_position(self) -> int | None:
